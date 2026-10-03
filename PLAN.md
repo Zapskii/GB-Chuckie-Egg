@@ -45,6 +45,15 @@ panel. All three are re-spaced; the score screen's fix cost it two of its ten
 entries (recorded below). `make verify` is 16 targets, 31 `RESULT` lines, all
 green. Next: the remaining open decisions at the foot of this file.
 
+**Published.** The repo is public at <https://github.com/Zapskii/GB-Chuckie-Egg>:
+the port's own code and none of the game's data, the generated files being built
+locally per the README. The README also carries the game's history, which is
+where the premise belongs — *Chuckie Egg* is 1983 (1984 is the Pick & Choose
+re-release), and **no Game Boy version was ever released**: no Nintendo platform
+appears in its release records, and the only handheld builds are homebrew made
+since. This is a fan port of the ZX Spectrum original, not a port of an existing
+Game Boy one.
+
 > **Legal:** Chuckie Egg is under copyright (Nigel Alderton / A&F Software). This
 > repo ships none of its data — the ten generated `src/*.asm` files are built
 > locally from the reference disassembly, per the README.
