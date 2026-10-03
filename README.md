@@ -1,6 +1,6 @@
 # Chuckie Egg — Game Boy
 
-A port of the ZX Spectrum game (1984, Nigel Alderton / A&F Software) to the DMG,
+A port of the ZX Spectrum game (1983, Nigel Alderton / A&F Software) to the DMG,
 written in RGBDS assembly. Not affiliated with or endorsed by the original rights
 holders.
 
@@ -53,3 +53,40 @@ what the port was play-tested in.
   is worth cloning for the same reasons.
 - `PLAN.md` — the authoritative record: the goal, the per-phase findings, the
   traps that cost time, and the current status header. Read it before the code.
+
+## History
+
+*Chuckie Egg* was released by A&F Software in **1983** for the ZX Spectrum 48K, at
+£6.90. Nigel Alderton wrote it as a teenager — he worked Saturdays in A&F's
+Rochdale shop — after showing the company a game he had been writing himself,
+under the working title *Eggy Kong*. It was built on the arcade games he was
+playing at the time, *Donkey Kong* and above all *Space Panic*: he described the
+result as "really Space Panic 2". Doug Anderson wrote the BBC Micro version
+alongside it and Mike Webb the Dragon port. It reached #12 in the multiple-formats
+chart in late 1983 and the BBC version topped the BBC charts for a week in 1984; a
+1984 re-release by Pick & Choose kept it on shelves, and reportedly over a million
+copies sold across its ports. A sequel, *Chuckie Egg 2 (Choccy Egg)*, followed in
+1985.
+
+The port list is long and covers most of the machines of the period — ZX Spectrum,
+BBC Micro and Dragon 32/64 in 1983; Commodore 64 (May 1984), Acorn Electron and
+MSX in 1984; Tatung Einstein, Amstrad CPC and Atari 8-bit in 1985; Amiga and Atari
+ST in 1988; IBM PC in 1989; and a VIC-20 version as late as 2021.
+
+**There was never a released Game Boy version.** No Nintendo platform appears in
+any of the game's release records — not the DMG, not the Game Boy Color, neither
+officially licensed nor first-party. What exists is homebrew, and only since: the
+Game Boy Color beta *Chuckie DX GB* (Chris Bailey / The HiVE, last updated 2001,
+shipped without music, pause or a high-score table), and
+[DrAndyArmstrong/chuckie-egg-gb](https://github.com/DrAndyArmstrong/chuckie-egg-gb),
+a recent Color port built from the **BBC Micro** original rather than the Spectrum
+one.
+
+This repository is another of those: the ZX Spectrum version, ported to the
+original DMG rather than the Color, in RGBDS assembly.
+
+Sources: [Wikipedia](https://en.wikipedia.org/wiki/Chuckie_Egg),
+[World of Spectrum](https://worldofspectrum.net/item/0000958/),
+[Spectrum Computing](https://spectrumcomputing.co.uk/entry/0000958),
+[GameBrew](https://www.gamebrew.org/wiki/Chuckie_DX_GB), and
+[The Guardian](https://www.theguardian.com/games/2026/apr/21/in-my-mind-it-was-just-tall-birds-wandering-around-on-platforms-the-making-of-chuckie-egg).

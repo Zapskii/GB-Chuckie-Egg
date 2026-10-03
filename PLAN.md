@@ -1,6 +1,6 @@
 # GB Chuckie Egg — Port Plan
 
-Porting ZX Spectrum *Chuckie Egg* (1984, Nigel Alderton / A&F Software) to the
+Porting ZX Spectrum *Chuckie Egg* (1983, Nigel Alderton / A&F Software) to the
 Game Boy (DMG / LR35902-SM83), written in RGBDS assembly.
 
 Plan written 2026-10-02. Status: **Phases 6a/6b/6c-1/6c-2/6c-3/6c-4/7 complete**
@@ -979,7 +979,7 @@ re-read line by line while writing this and what is reported from the decode
 pass and still wants a look when it is implemented.
 
 **Address hazard, worth knowing before any of this.** The hex comments scattered
-through paulie's source (`; $72D8 - PlayerX`) are the **original 1984**
+through paulie's source (`; $72D8 - PlayerX`) are the **original game's**
 addresses, not this reassembly's. `PlayerX` is `$6F24` here. Trust the labels
 and the assembler-computed comments; cross-check against `reference/mrcook`.
 Three comments in that file have already been wrong (the timer's two, and
