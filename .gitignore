@@ -1,0 +1,31 @@
+# build output
+build/
+*.gb
+*.sym
+*.map
+*.sav
+*.o
+
+# read-only reference clones -- reading material, not our source
+reference/
+__pycache__/
+*.pyc
+
+# local machine overrides (see the Makefile: PY)
+local.mk
+
+# macOS
+.DS_Store
+
+# generated from the reference disassembly by `make data` -- the game's
+# data, not ours to publish, and not tracked here
+src/tiles.asm
+src/levels.asm
+src/sprites.asm
+src/hens.asm
+src/henstarts.asm
+src/font.asm
+src/music.asm
+src/title.asm
+src/score.asm
+src/duck.asm
