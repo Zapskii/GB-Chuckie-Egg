@@ -17,7 +17,7 @@ generate them, build:
     git clone https://github.com/Paulie68000/ZXSpectrumChuckieEgg reference/paulie
     make data        # -> the ten generated src/*.asm files
     make             # -> chuckie.gb, 32K DMG, no mapper
-    make verify      # 16 targets, 31 RESULT lines
+    make verify      # 17 targets, 32 RESULT lines
 
 `make data` refuses to run without the reference clone, and `reference/` is not
 tracked. Regeneration is byte-exact: the same source gives the same ten files,

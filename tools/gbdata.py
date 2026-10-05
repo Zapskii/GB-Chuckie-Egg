@@ -775,8 +775,8 @@ def deshift(sprite):
 
     The Z80's sprite writes are byte-aligned, so its art for a hen at the half
     cell is drawn 4px right to cancel that; ours is not, so the shift comes back
-    off. Nothing is lost: only the ink in the rightmost 4px would be, and the
-    frames this applies to end their ink at column 11.
+    off. Nothing is lost: only the ink in the leftmost 4px would be, and the
+    frames this applies to start their ink at column 4.
     """
     out = bytearray(SPRITE_BYTES)
     for r in range(16):
