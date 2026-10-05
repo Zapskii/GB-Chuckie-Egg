@@ -299,6 +299,20 @@ happened at all, not a rule.
 That middle row is why the fix came with a *parked* check rather than a count:
 the count passed with the probe still wrong.
 
+**No level was spared — level 1 was only the worst case.** The same meter over
+all eight maps, plus the four lap variants of map 0 (`make level N=` …, 2000
+frames each), counts how many live hens ever change y. Before the fix: 43 live
+hens, 27 of them never moved, every one of those with a ladder in reach. After:
+none. The one hen that still never moves is level 8's slot 2, which spawns on
+the top row with platform along its whole walk and birdseed — not ladder —
+three rows up: boxed in by the level, and unmoved in the pre-fix run too.
+
+The lap-level runs need the duck suppressed (`--nodeath` in the meter, clearing
+the death flag each frame). From level 9 on the loose duck kills an idle Harry
+and restarts the level, and a restart resets the hens to their spawn records,
+which reads exactly like a hen that cannot leave them — that confound had the
+laps looking half-frozen *after* the fix until it was removed.
+
 **Checked** by `verify_hens.py` section 10 (both hens must change y within 2000
 frames; against the pre-fix gate it fails 2/2) and section 10b, which parks a
 hen one *armed* step above an aligned y with a platform exactly two cells to its
