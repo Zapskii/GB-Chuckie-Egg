@@ -351,6 +351,95 @@ for s, rec in zip(live, spawn):
         fail("hen slot %d restarted at %s, HenStarts says %s"
              % (s, hen(s), rec))
 
+# --- 10. A hen takes a ladder, and gets off it again -----------------------
+# Level one's hens can only leave the platforms they start on by walking onto a
+# ladder, and the lookahead that notices one is gated on a bit of the byte the
+# Z80 reads out of mem[Counter] -- the byte at the address the counter holds,
+# the ROM on the Spectrum (:9133, :91c7, :9237). Read as a bit of the counter
+# itself that gate is the hen's own x phase in disguise: the counter advances 5
+# per visit to a slot and a walking hen moves 4px, so the two agree for ever and
+# the gate is either always armed or always shut. Both of level one's hens spawn
+# 8-aligned, so they were the shut case and never once changed y.
+#
+# And a hen that has climbed has to come off again: the ladder check only ever
+# flips down<->up, so a climb direction becoming a walk direction is the side
+# probe firing, and its direction is the side it left by. Those step-offs are
+# counted here and reported, but what they prove is section 10b's job -- a hen
+# whose probe reads the wrong cell still leaves a ladder often enough by luck
+# for a count to pass.
+LADDER_WINDOW = 2000
+spawn_y = {s: rec[1] for s, rec in zip(live, spawn)}
+left_platform = {s: False for s in live}
+off = {HEN_LEFT: 0, HEN_RIGHT: 0}
+prev = {s: hen(s) for s in live}
+for _ in range(LADDER_WINDOW):
+    tick(1)
+    for s in live:
+        r = hen(s)
+        if r[1] != spawn_y[s]:
+            left_platform[s] = True
+        if prev[s][2] in (HEN_DOWN, HEN_UP) and r[2] in (HEN_LEFT, HEN_RIGHT):
+            off[r[2]] += 1
+        prev[s] = r
+print("%d frames: left the starting platform %s, stepped off ladders %s"
+      % (LADDER_WINDOW, left_platform,
+         {("left" if d == HEN_LEFT else "right"): n for d, n in off.items()}))
+if not all(left_platform.values()):
+    fail("hen(s) %s never changed y in %d frames: the ladder lookahead is shut "
+         "again (the gate byte's bits must not track the hen's x phase)"
+         % ([s for s in live if not left_platform[s]], LADDER_WINDOW))
+if reg("wPlayerDead"):
+    fail("Harry died while nobody was touching anything")
+
+# --- 10b. The step-off probe looks beside the hen, not at its own cell ------
+# A hen is 16px wide, so the cell beside it is x-8 one way and x+16 the other
+# (:923d, :9252). Probing x+8 for the right looked at the hen's own right half,
+# which on a ladder is its right ladder tile, so a platform there was only ever
+# a coincidence -- the old probe still fired now and then (1 rightward step-off
+# in 2000 frames against 3 once fixed), which is why a count cannot carry this.
+# Park one where there is no coincidence to be had: in the climb path, one step
+# above an aligned y, with a platform exactly two cells to its right and none
+# one cell either side. Only the x+16 probe can see that platform, and only one
+# way is open, so one armed step must send the hen right.
+#
+# Only an aligned y runs the probe, and a step lands on one from y+4; the probe
+# row is then y-8, so a hen parked at r*8+12 moving down reaches r*8+8 and looks
+# at row r. Bit 0 of the gate byte decides whether that step is armed at all and
+# alternates, so a few tries cover it -- each one re-parks and forces slot 0's
+# next step through wHenTick and the round-robin.
+for s in live:
+    if s != 0:
+        put_hen(s, HEN_NONE, 0, HEN_RIGHT)   # nothing else live to wander into Harry
+step_off = next(
+    ((r, c) for r in range(4, 20) for c in range(1, 30)
+     if level[r * 32 + c + 2] == PLATFORM
+     and level[r * 32 + c + 1] != PLATFORM
+     and level[r * 32 + c - 1] != PLATFORM
+     and abs(c * 8 - reg("wPlayerX")) > 40), None)
+if step_off is None:
+    fail("no cell in level 1 sits beside a platform on its right alone, so the "
+         "step-off probe cannot be parked on")
+else:
+    r, c = step_off
+    took = None
+    for attempt in range(6):
+        put_hen(0, c * 8, r * 8 + 12, HEN_DOWN)
+        pb.memory[sym["wHenTick"]] = 1
+        pb.memory[sym["wCurrentHen"]] = HEN_MAX - 1
+        tick(1)
+        if hen(0)[2] == HEN_RIGHT:
+            took = attempt
+            break
+    print("hen above the lone right platform at (row %d, col %d): stepped off "
+          "right after %s" % (r, c, "no forced step" if took is None
+                              else "%d forced step(s)" % (took + 1)))
+    if took is None:
+        fail("a hen with a platform one cell to its right and none to its left "
+             "never stepped off right: the side probe is reading the hen's own "
+             "cell (8 off it) instead of the one beside it")
+    if reg("wPlayerDead"):
+        fail("the step-off check killed Harry")
+
 pb.stop(save=False)
 for f in failed:
     print("FAIL:", f)

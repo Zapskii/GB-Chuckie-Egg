@@ -383,6 +383,7 @@ wHens:                ds HEN_MAX * 4
 wCurrentHen:          db          ; round-robin slot, 0..HEN_MAX-1
 wHenTick:             db          ; counts down to the next hen update
 wHenFrameCtr:         db          ; low byte of the Z80's FrameCounter
+wHenGate:             db          ; the Z80's mem[Counter] byte -- see UpdateHens
 
 ; The hen the update is currently working on, unpacked. The Z80 keeps these in
 ; registers; we keep them here because GetMapAddr wants D and E.
@@ -2186,6 +2187,22 @@ UpdateHens:
     ld hl, wHenFrameCtr
     inc [hl]
 
+    ; The original's gates are not on the counter's parity. Having incremented
+    ; it, the Z80 reads mem[Counter] -- the byte at the address the counter
+    ; holds, on the Spectrum the ROM -- and takes bit 0 for the gate that lets
+    ; a hen think about a ladder on only some of its steps, and bit 1 for which
+    ; side it probes first (:9133, :91c7, :9237, :9228). The shape of that
+    ; matters more than the source: the counter advances 5 per visit to a slot
+    ; and a walking hen moves 4px, so a plain bit of the counter is the hen's
+    ; own x phase in disguise, and the lookahead is then always armed or never.
+    ; Mixing the byte with its nibble swap stands in for the fixed but
+    ; arbitrary byte the original read, and its bits do not track that phase.
+    ld a, [hl]
+    ld b, a
+    swap b
+    xor b
+    ld [wHenGate], a
+
     ld hl, wCurrentHen
     inc [hl]
     ld a, [hl]
@@ -2337,12 +2354,17 @@ HenStepX:
 
     ; The ladder lookahead, which is what turns a hen walking past a ladder
     ; into one that climbs it. It runs on the step that lands mid-cell --
-    ; BIT 2 of the NEW x -- and only on every other hen-step, and probes for
-    ; the ladder's left half just below the feet and just above the head.
+    ; BIT 2 of the NEW x -- and then only when bit 0 of the gate byte is
+    ; clear, and probes for the ladder's left half just below the feet and
+    ; just above the head. The Z80 takes the order of those two probes from
+    ; bit 1 of the same byte (:91c7, below the feet when it is set); this
+    ; always tries below first, which is the direction it picks half the time.
+    ; Only when a ladder runs both under the hen and over its head can the two
+    ; disagree, and both answers are ones the original gives.
     ld a, [wHenX]
     and $04
     jp z, StoreHen
-    ld a, [wHenFrameCtr]
+    ld a, [wHenGate]
     and $01
     jp nz, StoreHen
 
@@ -2424,23 +2446,24 @@ HenClimb:
     sub 4
     ld [hl], a
 .moved
-    ; Stepping off sideways. Only on an aligned y and an even FrameCounter --
-    ; the Z80's C gate, which is why hens leave ladders at a stately pace.
+    ; Stepping off sideways. Only on an aligned y and with bit 0 of the gate
+    ; byte clear -- the Z80's C gate, which is why hens leave ladders at a
+    ; stately pace.
     ld a, [wHenY]
     and $04
     jp nz, StoreHen
-    ld a, [wHenFrameCtr]
+    ld a, [wHenGate]
     and $01
     jp nz, StoreHen
     ld a, [wHenY]
     sub 8
     ld [wHenProbe], a
 
-    ; Bit 1 of the frame counter picks which side is tried first -- right when
-    ; it is clear, left when it is set. Both are tried; this only decides the
+    ; Bit 1 of the gate byte picks which side is tried first -- right when it
+    ; is clear, left when it is set. Both are tried; this only decides the
     ; order, so a hen between two platforms alternates rather than always
     ; stepping off the same way.
-    ld a, [wHenFrameCtr]
+    ld a, [wHenGate]
     and $02
     ld a, HEN_RIGHT
     jr z, .first
@@ -2458,8 +2481,13 @@ HenClimb:
     jp StoreHen
 
 ; ---------------------------------------------------------------------------
-; HenProbeSide: B = HEN_LEFT or HEN_RIGHT. If the cell 8px that way, at
-; wHenProbe, is a platform, point the hen that way and return A = 1.
+; HenProbeSide: B = HEN_LEFT or HEN_RIGHT. If the neighbouring cell that way,
+; at wHenProbe, is a platform, point the hen that way and return A = 1.
+;
+; A hen is 16px wide, so its x is the left of its two cells: the cell beside it
+; is x-8 going left and x+16 going right (:923d, :9252). Probing x+8 for the
+; right read the hen's own right half -- on a ladder, its right ladder tile --
+; so the platform the probe was after was only ever found there by coincidence.
 ; ---------------------------------------------------------------------------
 HenProbeSide:
     push bc
@@ -2467,7 +2495,7 @@ HenProbeSide:
     cp HEN_RIGHT
     ld a, [wHenX]
     jr nz, .left
-    add a, 8
+    add a, 16
     jr c, .no
     jr .go
 .left

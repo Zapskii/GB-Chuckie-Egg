@@ -42,8 +42,12 @@ Composing moved to the visible frame and the handler keeps only the copies
 eye**, which found three layouts whose lines sat on adjacent map rows and so
 touched — the title's two prompts, the instructions screen, and the name-entry
 panel. All three are re-spaced; the score screen's fix cost it two of its ten
-entries (recorded below). `make verify` is 16 targets, 31 `RESULT` lines, all
-green. Next: the remaining open decisions at the foot of this file.
+entries (recorded below). **The hens now leave the platforms they spawn on** —
+their ladder gate was reading the counter's parity instead of the ROM byte the
+Z80 reads out of `mem[Counter]`, which pinned the gate open or shut for a given
+hen for ever, and the climb step-off probed the hen's own cell instead of the
+one beside it (both recorded below). `make verify` is 17 targets, 32 `RESULT`
+lines, all green. Next: the remaining open decisions at the foot of this file.
 
 **Published.** The repo is public at <https://github.com/Zapskii/GB-Chuckie-Egg>:
 the port's own code and none of the game's data, the generated files being built
@@ -241,6 +245,74 @@ the only real risk. If a GB cannot show the level readably, everything downstrea
 changes — so prove that in Phase 1 before writing a line of game logic.
 
 ## Progress
+
+### The hens never left their platforms — the ladder gate is a byte of ROM, not the counter (2026-10-05)
+
+**Reported from a screenshot of the Spectrum original:** on level 1 both hens
+stayed on the platforms they spawn on, where the original walks them onto a
+ladder and down it.
+
+**The source.** Every decision a hen makes is gated on one byte, and the byte is
+not the counter it is computed from. `$9128` reads
+
+    ld hl,($736c) / inc hl / ld h,$00 / ld ($736c),hl
+    ld c,$01 / bit 0,(hl) / jr z,.. / dec c
+
+HL still holds the *new counter value* when `bit 0,(hl)` runs, so `(hl)` is
+memory at `$0000-$00FF` — on the Spectrum, the ROM. mrcook's listing says it in
+words: "Jump if BIT 0 of the byte stored at address #REGhl is set." Bit 0 is
+the gate that lets a hen think about a ladder at all (`:9133`, and the same C at
+`:9228` for stepping off); bit 1 picks which of two probes goes first (`:91c7`,
+`:9237`).
+
+**Why the counter's own parity locked the hens.** Read as a bit of the counter,
+that gate is the hen's own x phase in disguise. The counter advances once per
+hen call and there are five slots, so a given slot is visited every 5 calls — an
+odd stride — while the hen moves 4px a step. The walk lookahead is consulted
+only on the step that lands mid-cell and the walk cycle is two steps long, so
+between two consultations the counter has advanced 5 × 2 = 10: even. The gate is
+therefore either permanently armed or permanently shut for a given hen, never
+alternating. Level 1's two hens spawn 8-aligned (`x` 104 and 72), which is the
+shut case — neither of them ever changed y.
+
+**Fixed** by deriving a stand-in byte in `UpdateHens` (`a ^ swap(a)`) and reading
+bit 0 and bit 1 off that at the three sites. The original's exact byte is the
+Spectrum ROM's, which this repo does not ship and cannot regenerate, so the mix
+is chosen for the two properties that matter: its bits do not track the hen's x
+phase, and each is set on half the steps.
+
+**And the side probe was reading the hen's own cell.** A hen is 16px wide, so
+its x is the left of its two cells and the cell *beside* it is x-8 going left
+and x+16 going right (`:923d sub $08`, `:9252 c6 10`, byte-verified). The port
+probed x+8 for the right — the hen's own right half, which on a ladder is its
+right ladder tile — so a rightward step-off was a coincidence whenever it
+happened at all, not a rule.
+
+**Measured,** level 1, 2000 idle frames, the two spawning hens:
+
+| | left the starting platform | stepped off ladders L/R |
+|---|---|---|
+| before | no, no | 0 / 0 |
+| gate byte only | yes, yes | 5 / 1 |
+| gate byte + x+16 probe | yes, yes | 3 / 3 |
+
+That middle row is why the fix came with a *parked* check rather than a count:
+the count passed with the probe still wrong.
+
+**Checked** by `verify_hens.py` section 10 (both hens must change y within 2000
+frames; against the pre-fix gate it fails 2/2) and section 10b, which parks a
+hen one *armed* step above an aligned y with a platform exactly two cells to its
+right and none one cell either side, then forces that step through `wHenTick`
+and the round-robin: only the x+16 probe can see that platform, so failing to
+step off right is the bug and nothing else. Section 10b fails against the
+pre-fix x+8 probe.
+
+**Recorded divergence:** the walk lookahead always probes below the feet first,
+where the Z80 takes that order from bit 1 of the same byte. Only a ladder
+running both under the hen and over its head can tell the two orders apart, and
+both answers are ones the original gives, so honouring the bit would buy a
+coin-flip between two faithful outcomes for four probe blocks in the hot walk
+path. Commented at the probe.
 
 ### A landing stopped up to 3px into the platform — the frame's physics replay ran past it (2026-10-05)
 
