@@ -29,9 +29,17 @@ from pyboy import PyBoy
 START_FRAMES = 2
 
 
-def boot(rom, sound=False, start=True):
-    """The ROM up and running: screen painted, then START unless told not to."""
+def boot(rom, sound=False, start=True, prefill=None):
+    """The ROM up and running: screen painted, then START unless told not to.
+
+    `prefill(pb)` runs before the first tick, to stand in for memory a real
+    machine powers up with. PyBoy hands back zeros everywhere; a DMG does not,
+    so a check on anything the ROM never writes needs the difference. See
+    verify_init.py.
+    """
     pb = PyBoy(rom, window="null", sound_emulated=sound)
+    if prefill is not None:
+        prefill(pb)
     for _ in range(1, 400):
         pb.tick(1, True)
         if pb.memory[0xFF40] & 0x80 and pb.memory[0xFF47] == 0x1B:

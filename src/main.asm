@@ -711,6 +711,24 @@ Start:
     ldh [rSCY], a
     ldh [rSCX], a
 
+    ; The sprite image, and the hardware's OAM with it. The shadow is
+    ; ClearOamShadow's -- its own comment has the why -- and every level load
+    ; clears it again; this is the power-on one, for the title and the first
+    ; frame after START. What it does not cover is entries 32..39: OAM_BYTES
+    ; stops at the duck, so the blitter never copies that far and nothing on any
+    ; level ever writes them. They are OAM's alone, and an emulator's zeros hide
+    ; that too -- a real DMG shows whatever those cells powered on with, in the
+    ; playfield, for as long as OBJ is on. Zero all forty here, once, with the
+    ; LCD off. A comes back 0 from the call and stays 0 through the loop, which
+    ; is also what the band's registers below want.
+    call ClearOamShadow
+    ld hl, _OAMRAM
+    ld b, 40 * 4
+.zero_oam
+    ld [hl+], a
+    dec b
+    jr nz, .zero_oam
+
     ; The status band's split. Both registers go in with the LCD off, which is
     ; also what keeps the DMG's spurious-STAT-interrupt-on-write bug away.
     ldh [rWY], a                     ; window at the top of the screen
@@ -837,6 +855,21 @@ Start:
     ld [wSfxTimer], a                ; nor an effect. Nothing else zeroes these,
     ld [wSfxFreq], a                 ; and the title has no draw pass running
                                      ; over the top of a stray one
+
+    ; And no announcement is up. This one is not a park like the three above --
+    ; it is the same bug as the OAM clear: the VBlank handler tests wOnNotice
+    ; with the front-end flags and skips the whole draw pass when it is set, and
+    ; the only thing that ever writes it is ShowNotice. A level that arrives
+    ; through ShowNotice is fine -- the routine clears it on the way out -- but
+    ; the title's START goes EnterTitle -> StartGame -> NextLevel.reload, which
+    ; is no notice at all, so the first level is played with whatever the byte
+    ; powered on with. Nonzero there means no camera, no sprites and no status
+    ; row for that level: on an emulator it is 0 and nothing shows, on a DMG it
+    ; is whatever the cell held. (EnterTitle clears wOnTitle/wOnScores/wOnInstr
+    ; and deliberately not this one -- the flag is not a front end -- so it is
+    ; cleared here, at power-on, before any handler can read it: interrupts are
+    ; still off.)
+    ld [wOnNotice], a
 
     ld a, IEF_VBLANK | IEF_STAT
     ldh [rIE], a
@@ -1711,6 +1744,36 @@ CommitCamera:
     ret
 
 ; ---------------------------------------------------------------------------
+; ClearOamShadow: hide every entry of the OAM image.
+;
+; An entry nothing writes is a sprite pinned to the SCREEN -- OAM is in screen
+; coordinates and nothing scrolls it, so it does not travel with the level --
+; and the draws skip the slots a level does not use: DrawHens the entries of a
+; hen its spawn table has no record for (HEN_NONE), and DrawLifts the ones a
+; level with no lift has. That is a stray sprite on a real machine and nothing
+; at all under an emulator's zeros, which is how it was found twice: once at
+; power-on, and once when a game over at level 3 left its third hen and a
+; platform on level 1 for good.
+;
+; Every level arrives through LoadLevel, which calls this, so a level cannot
+; inherit the birds or platforms of the one before it. Start calls it too, for
+; the state the cells powered on with -- see there.
+;
+; Y 0 is the whole of hiding an entry: it puts the sprite above the screen and
+; its column, tile and attribute are never reached. A is 0 on return, which the
+; two callers both use.
+; ---------------------------------------------------------------------------
+ClearOamShadow:
+    xor a
+    ld hl, wOamShadow
+    ld b, OAM_BYTES
+.loop
+    ld [hl+], a
+    dec b
+    jr nz, .loop
+    ret
+
+; ---------------------------------------------------------------------------
 ; DrawFrame: compose the frame -- the camera, the sprites, the status row.
 ; Runs in the visible part of the frame, where the whole of it is a few
 ; thousand cycles out of the 65000-odd that are not VBlank. The handler then
@@ -2475,13 +2538,14 @@ DrawLifts:
     ret
 .hide
     ld hl, wOamShadow + LIFT_OAM * 4
-    ld b, 2
+    ld b, 4                  ; two entries per platform, and there are two of them
     xor a
 .hide_entry
     ; y = 0 puts the entry above the screen, which is the whole of hiding it --
-    ; its column, tile and attribute are never reached. ONLY the y is written:
-    ; this used to write twice per entry with a stride of four, so two live
-    ; entries past the second platform had their y zeroed with it.
+    ; its column, tile and attribute are never reached. ONLY the y is written, so
+    ; nothing past the platforms is touched. The count used to be 2, which hid
+    ; the near platform and stopped: on a level with no lift the far one is the
+    ; platform of the level before it, still on the screen.
     ld [hl], a
     inc hl
     inc hl
@@ -3803,6 +3867,11 @@ LoadLevel:
     call MemCopy
 
     call ClearMap
+    ; The sprite image goes with the map. The draws below cover only the slots
+    ; this level fills, so without this one that spawns fewer hens than the last
+    ; keeps its birds -- and one with no lift keeps its platform. See
+    ; ClearOamShadow.
+    call ClearOamShadow
     call DrawLevel
 
     call ResetPlayer

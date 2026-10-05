@@ -68,7 +68,7 @@ data:
 LEVELS := 1 2 3 4 5 6 7 8
 verify: verify-levels verify-level9 verify-camera verify-player verify-hens verify-lifts verify-eggs \
         verify-hud verify-lives verify-music verify-title verify-scores verify-duck \
-        verify-notice verify-sprites verify-laps
+        verify-notice verify-sprites verify-init verify-laps
 
 verify-levels:
 	@for n in $(LEVELS); do \
@@ -119,6 +119,14 @@ verify-hud:
 	  $(PY) tools/verify_hud.py build/l1.gb || exit 1
 	@$(MAKE) -s -B ROM=build/l3.gb ASMFLAGS=-DLEVEL_NUM=3 >/dev/null && \
 	  $(PY) tools/verify_hud.py build/l3.gb || exit 1
+
+# The OAM image and wOnNotice: the memory the ROM read before writing, against a
+# machine that powered up dirty instead of an emulator's zeros -- at boot, and
+# again at every level load, which is where a level inherits the slots the one
+# before it used. The boot ROM is level 1, which is the level the check's
+# never-written entry range is read off; see the script.
+verify-init: $(ROM)
+	$(PY) tools/verify_init.py $(ROM)
 
 # Lives, game over, and the time-up rule. Level-independent, so the boot ROM.
 verify-lives: $(ROM)
@@ -178,6 +186,13 @@ verify-sprites:
 verify-laps: $(ROM)
 	$(PY) tools/verify_laps.py $(ROM)
 
+# Every WRAM byte the ROM reads before writing: one boot per variable, so it is
+# minutes rather than seconds and stays out of `verify`. `make sweep` is the
+# check to reach for when something works in PyBoy and not on hardware; see the
+# script and PLAN.md, "The bytes nothing writes".
+sweep: $(ROM)
+	$(PY) tools/sweep_wram.py $(ROM)
+
 # Headless screenshot. SCRIPT is one char per frame:
 #   . none   R/L/U/D d-pad   A B buttons   S T start/select
 # ASMFLAGS changes the ROM but not any timestamp, so make would happily reuse a
@@ -195,4 +210,4 @@ OBJDIR := build
 clean:
 	rm -rf build $(ROM) $(ROM:.gb=.sym) $(ROM:.gb=.map)
 
-.PHONY: all data verify verify-levels verify-level9 verify-camera verify-player verify-hens verify-lifts verify-eggs verify-hud verify-lives verify-music verify-title verify-scores verify-duck verify-notice verify-sprites verify-laps shot clean FORCE
+.PHONY: all data verify verify-levels verify-level9 verify-camera verify-player verify-hens verify-lifts verify-eggs verify-hud verify-lives verify-music verify-title verify-scores verify-duck verify-notice verify-sprites verify-init verify-laps sweep shot clean FORCE

@@ -242,6 +242,65 @@ changes — so prove that in Phase 1 before writing a line of game logic.
 
 ## Progress
 
+### The bytes nothing writes — three bugs off real hardware (2026-10-05)
+
+**Reported off a physical DMG:** two small glyphs pinned to the screen that did
+not move when the camera did. They were OAM entries the ROM never writes.
+An emulator powers OAM and WRAM up as zeros and a DMG powers them up with
+whatever the cells held, so this class of bug cannot show in PyBoy — and the
+port had **three** of them.
+
+**1. OAM.** `BlitOam` copies `OAM_BYTES` out of `wOamShadow` every VBlank, and
+`OAM_BYTES` stops at the duck's last entry — entries 32..39 are never written on
+any level. `DrawHens` skips the entries of a hen a level does not spawn (its
+`HEN_NONE` test), and `DrawLifts`, on a level with no lift at all, hides only the
+near platform and leaves the far one's pixels where they were — four entries go
+up and two come down. So on level 1's two hens entries 12..27 are left alone as
+well. OAM is in **screen** coordinates and nothing scrolls it, so a leftover
+entry is a sprite stuck to the screen while the level moves under it — exactly
+the report. Y 0 is a sprite off the top, which is why the emulator's zeros hide
+it.
+
+**2. `wOnNotice`.** The VBlank handler tests it with the front-end flags
+(`:629-636`) and skips the *whole draw pass* while it is set. Only `ShowNotice`
+writes it, and it clears it on the way out — but the title's START goes
+`EnterTitle` → `StartGame` → `NextLevel.reload`, which is no notice at all, so
+the first level is played with whatever the byte powered on with. Nonzero there
+is no camera, no sprites and no status row for that level. `EnterTitle` clears
+`wOnTitle`/`wOnScores`/`wOnInstr` and deliberately not this one (the flag is not
+a front end), so nothing did.
+
+**3. The same thing a level later.** 1 is not a power-on bug at all — the draws
+skip those slots on every level, so what was in them only *looked* like
+hardware's leftovers because `Start` was the one place that cleared the image.
+A game over at level 3, then START, and level 1 comes up with level 3's third hen
+in entries 12..15 and its far platform in 26..27: the second report, from the
+already-fixed build. Two of the three are this, and neither the hen nor the
+platform needs a dirty cell to appear — only a level that used fewer slots than
+the one before it.
+
+**1 and 2 are fixed in `Start`** (the boot clear), **with the LCD off and
+interrupts still disabled:** the shadow, all 40 OAM entries, and `wOnNotice`.
+**3 is fixed where every level arrives** — `LoadLevel` now calls the same
+`ClearOamShadow`, so a level cannot inherit the one before's birds or platforms,
+and `DrawLifts`' hide loop writes all four entries instead of two. That loop's
+under-count had been covered up for as long as it existed: on a level 1 reached
+from boot the shadow was already zero.
+
+`tools/verify_init.py` checks all three. It boots with every OAM entry on screen
+and every WRAM byte `$A5` before the first tick, which is the only way a check of
+this class can fail — on an emulator's zeros every one of them passes. Then, for
+3, it stands on the title (past the boot clear, so nothing overwrites the poke),
+fills the image with `$A5`, presses START, and asserts that the 16 slots level 1
+does not use came back zero and that the 16 it does use were drawn. Removing any
+of the fixes fails it.
+
+**Finding the second one was a sweep, not a hunch.** `tools/sweep_wram.py` dirties
+one WRAM variable at a time and compares the frame against a clean run; 78
+variables × 3 values, and `wOnNotice` was the only one of 78 that changed the
+picture. Nothing else in the ROM reads a byte before writing it — the sweep is
+what says so, and it is the tool to reach for the next time this class turns up.
+
 ### Phase 4 — hens, collision, the death path, and the lifts
 
 Hens walk, are lethal, and the level restarts after the freeze; the lifts carry
