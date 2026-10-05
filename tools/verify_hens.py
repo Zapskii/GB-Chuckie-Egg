@@ -116,6 +116,27 @@ if badtiles:
          % (len(badtiles), len(hens) * 4, badtiles[:4]))
 print("hen sprite sheet: %d frames x 4 tiles in VRAM" % len(hens))
 
+# ...and the frames the draw uses must start their ink at column 0. DrawOneHen
+# puts the whole 16px sprite at the hen's own x, so a frame whose ink starts
+# further right is standing 4px off that x -- which is what the Z80's art for
+# the walk and climb pairs does, on purpose: its sprite writes are byte-aligned
+# (x >> 3), so it draws the +4 copy whenever the hen's x is at the half cell.
+# Left in, a climbing hen parked 4px off its ladder for the whole climb (which
+# is how it was found) and a wandering one jittered as the cycle alternated,
+# since only the +4 half of it was displaced. Checked on the sprite sheet rather
+# than on a screen pixel, so it fails on the art and not on catching a hen
+# mid-step.
+off = {f: min(c for c in range(16)
+              if any(row >> (15 - c) & 1 for row in
+                      ((sp[r * 2] << 8) | sp[r * 2 + 1] for r in range(16))))
+       for f, sp in enumerate(hens) if f not in (6, 7)}
+bad = {f: c for f, c in off.items() if c}
+if bad:
+    fail("hen frames %s start their ink %s px into the window, so they draw "
+         "that far right of the hen's own x -- the Z80's x&4 shift is back in "
+         "the art (see gbdata.py, HEN_SHIFTED)"
+         % (sorted(bad), [bad[f] for f in sorted(bad)]))
+
 # --- 3. Each live hen is four OAM entries, on OBP1, laid out TL/TR/BL/BR ---
 def oam_quad(slot):
     return [oam(4 + slot * 4 + i) for i in range(4)]

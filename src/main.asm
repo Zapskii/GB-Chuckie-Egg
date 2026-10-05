@@ -1153,6 +1153,13 @@ CollidePlayerToWorld:
 ; AirPhysics: replay the main-loop iterations a single GB frame is standing in
 ; for. The Z80 calls this path on every iteration, so the counters inside
 ; AirStep are in Spectrum loop units, not frames. See PHYSICS_STEPS.
+;
+; A landing ends the replay. AirStep's CheckBelow clears PlayerInAir part-way
+; through the 130 iterations, and the Z80 would take the ground path from the
+; next iteration on; replaying the fall regardless carried him up to 3px past
+; the tile he had already landed on -- and left PlayerInAir clear at a y that
+; is not y+1 % 8 == 0, so nothing put him back. On screen it is Harry sunk into
+; the platform he just dropped onto, and a jump is what shakes him out of it.
 ; ---------------------------------------------------------------------------
 AirPhysics:
     ld a, [wPlayerInAir]
@@ -1163,6 +1170,9 @@ AirPhysics:
     push bc
     call AirStep
     pop bc
+    ld a, [wPlayerInAir]
+    cp 2
+    ret nz                   ; he landed: the rest of the frame is the ground
     ld a, [wPlayerDead]
     and a
     ret nz                   ; he fell under the floor: the level is over
@@ -2639,18 +2649,21 @@ DrawHens:
 ; Which of the eight hen frames to show is chosen here, not translated. The
 ; Z80's own selection (DrawHenFrame, Chuckie.asm:1045) alternates the pose by
 ; testing the hen's x and y against 4, because a Spectrum screen write is
-; byte-aligned and it has to pick between a sprite and a 4px-shifted copy of
-; it. An OBJ takes a pixel X, so the shifted copies are not needed at all and
-; what is left is a direction-to-picture choice -- written out here rather
-; than left as the arithmetic the hardware no longer asks for.
+; byte-aligned: its picture lands on a byte whatever x is, so it draws the +4
+; copy of the art whenever x is at the half cell. An OBJ takes a pixel X and
+; this routine adds the OAM column to x itself, so that compensation is not
+; wanted and gbdata takes the 4px back off frames 2/3 and 4/5 at extraction.
+; What is left of the Z80's x and y tests is the pose choice: the leg positions
+; alternate with the step, which is what those tests were doing by accident (a
+; 4px step flips that bit every other one), so the port alternates on the
+; animation counter and every frame stands at the hen's own x.
 ;
 ; The source's eight blocks are: 0/1 standing left/right, 2/3 the two climbing
 ; poses, 4/5 walking left/right, and 6/7 the eating poses -- but 6/7 are not
 ; usable art (they are a merged composite, see the note in gbdata.py), so a
 ; pecking hen keeps the standing pose and the peck reads as the pause where it
-; stops. The walking and climbing pairs are used to animate, which is what the
-; Z80's x/y tests were doing by accident: a 4px step flips that bit every
-; other step.
+; stops. The walking and climbing pairs are the two poses the animation
+; alternates.
 ;
 ; Hens carry attribute $10, selecting OBP1, so they read as a different thing
 ; from Harry even though both are drawn from the same tile ink.

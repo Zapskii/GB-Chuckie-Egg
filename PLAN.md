@@ -242,6 +242,95 @@ changes — so prove that in Phase 1 before writing a line of game logic.
 
 ## Progress
 
+### A landing stopped up to 3px into the platform — the frame's physics replay ran past it (2026-10-05)
+
+**Reported from an emulator screenshot:** dropping Harry onto a platform on level
+4, he fell *into* it and stayed there; jumping put him right again. Both halves
+of that are one bug, and the second half is the tell.
+
+**The source.** The Z80's main loop is free-running and dispatches on
+`PlayerInAir` every iteration, so the moment the in-air block's tail clears it
+(`CollideWithWorld`'s `.landed`), every remaining iteration of that frame takes
+the *ground* path instead. This port is frame-locked: a frame is one gameplay
+tick, and `AirPhysics` stands in for the other 130 loop iterations by replaying
+`PHYSICS_STEPS` (`$82`) calls to `AirStep`. `AirStep` ends in
+`BounceWhileInAir`, which can clear `PlayerInAir` part-way through that replay —
+and nothing re-tested it, so the remaining iterations carried on stepping him
+down. `.landed` only *accepts* a landing at `y+1 % 8 == 0`, so the pixels below
+it are ones it refuses to re-land on: he passes the tile he just landed on and
+stops only when the replay runs out. The result is `PlayerInAir` clear at a y
+that is not cell-aligned, which nothing in the game recovers from — except a
+jump, since the rise re-tests the cell below at every pixel and re-lands him at
+the aligned y. That is the reported "alignment returns if Harry jumps".
+
+**Measured,** level 4, dropping him onto two static platforms from eight
+different phases of `wFallingCounter` (the number of `AirStep` calls left in the
+frame when he lands is what fixes the sink, so the phase is the variable):
+
+| drop onto | landing y | sink, by phase (before) | after |
+|---|---|---|---|
+| row 10, x=48 | 103 | +3 +1 0 +3 +2 +1 0 +2 | 0 ×8 |
+| row 4, x=16 | 55 | +3 +1 0 +3 +2 +1 0 +2 | 0 ×8 |
+
+Only 2 of the 8 phases landed where they should, and the sink is up to 3px — on
+a platform 4px thick, most of the way through it.
+
+**Fixed** in `AirPhysics`: re-test `wPlayerInAir == 2` after each `AirStep` and
+return when it has cleared. That is the Z80's own dispatch, one iteration
+granularity coarser.
+
+**Checked** by `verify_player.py` section 11b, which drives the drop from all
+eight phases and requires the same landing y every time; against the pre-fix ROM
+it fails 8/8. Section 7 already asserted `y+1 % 8 == 0` after a landing and had
+passed all along: it lands him on level 1's *floor*, where an overshoot has
+nowhere to go and the frame usually ends first, so the bug needed a raised tile
+to show.
+
+### A climbing hen was 4px off its ladder — the Z80's art shift, left in (2026-10-05)
+
+**Reported from an emulator screenshot:** on level 3, a hen climbing the middle
+ladder looked out of alignment with it. It was, and it was the port's fault —
+the whole of it is one number: the Z80's hen art carries a 4px shift and this
+port's draw does not want it.
+
+**The source.** A Spectrum screen write is byte-aligned: `GetScreenAddress`
+(`Chuckie.asm:1298`) is `base + (x >> 3)`, so a sprite's picture lands on a byte
+whatever its x is. `DrawHenFrame` compensates by keeping a +4 copy of the art
+and choosing it whenever the hen is at the half cell — `HenLeftRight`'s
+`BIT 2,E; ADD A,$04` picks blocks 4/5 for a walk, and the climb pair (2/3) is
+drawn 4px right too, which is safe because a climb is only ever entered from
+`HenWalk`'s own `BIT 2,E` gate, i.e. with `x&4` set. Window and art always
+cancel: **the original's hen stands at its record's x and only its legs move.**
+
+**The port.** A GB OBJ takes a pixel X, so `DrawOneHen` adds the OAM column to
+the hen's own x — correct — but `gbdata` extracted the art verbatim, so the +4
+was still baked into it. Every walk and climb frame was therefore drawn 4px
+right of the original, which reads two ways: a climbing hen parked 4px off its
+ladder for the whole climb (what was reported), and a wandering hen jittering as
+its cycle alternated, since only the +4 half of the cycle was displaced.
+
+**Measured,** level 3, the hen on the middle ladder at `x=124`, `y=108`:
+
+| | climb frame's ink, map x |
+|---|---|
+| Z80 (window `x>>3` = 120, art +4) | 124..131 — flush with the ladder's left column, centred on a 16px ladder |
+| port, before | 128..135 — pressed against the ladder's right edge |
+| port, after | 124..131 |
+
+**Fixed in the art, not the draw.** `gbdata.py` moves frames 2/3 and 4/5 back
+4px as it extracts them (`deshift`, `HEN_SHIFTED`), which is lossless — those
+frames end their ink at column 11, so nothing reaches the rightmost 4px the
+shift drops. 0/1 are the standing pair and the Z80 only draws them with `x&4`
+clear, so they are already at the right place. 6/7, the pecking pair, are the
+untouched composites and nothing draws them.
+
+**Checked** at both ends, because a wrong base address once read as plausible
+garbage and every screen-level check stayed green through it: `gbdata` refuses
+to generate art whose ink does not start at column 0 for any frame the draw
+uses, and `verify_hens.py` re-derives the same thing from the sprite sheet in
+VRAM, so it fails on the art rather than on catching a hen mid-step. Both were
+confirmed against the pre-fix art.
+
 ### The bytes nothing writes — three bugs off real hardware (2026-10-05)
 
 **Reported off a physical DMG:** two small glyphs pinned to the screen that did

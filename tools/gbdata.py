@@ -733,11 +733,26 @@ def asm_score(gfx):
 # for completeness, but DrawOneHen does not use them -- a pecking hen keeps its
 # standing pose.
 #
-# The Z80 pre-shifts these by 4px (`ADD A,$04` gated on `x&4`) because a Spectrum
-# screen write is byte-aligned. A GB OBJ takes a pixel X, so the shifted copies
-# are not extracted and the whole pre-shift scheme is deleted, not ported.
+# The Z80 pre-shifts these by 4px because a Spectrum screen write is byte-aligned
+# (`GetScreenAddress` is `x >> 3`, so the picture lands on a byte whatever x is).
+# It compensates by choosing the +4 copy whenever the hen's x is at the half
+# cell: `BIT 2,E; ADD A,$04` picks 4/5 for a walk and the climb pair 2/3 --
+# whose art is drawn 4px right too -- is only ever reached from a climb, which
+# its own `BIT 2,E` gate limits to `x&4` set. The two always cancel, so the
+# original's hen stands at its record's x and only its legs move.
+#
+# A GB OBJ takes a pixel X, so the port keeps the draw address exact (DrawOneHen
+# adds the OAM column to x, not to x&$F8) and the shift has to come off the art
+# instead. Leaving it in put every walk and climb frame 4px right of the
+# original -- a wander jittering as the cycle alternated, since only the +4 half
+# of it was displaced, and a climbing hen parked 4px off its ladder for the
+# whole climb, which is how it was found.
 HEN_BASE = 0x9010
 HEN_FRAMES = 8
+# The frames the Z80's `+$04` selects, i.e. the ones carrying its shift. 6/7 are
+# the pecking pair, drawn without the compensation and left exactly as the ROM
+# holds them; DrawOneHen does not use them (see below).
+HEN_SHIFTED = {2, 3, 4, 5}
 # The directions a hen record can hold. 1-4 are the HEN_* equates; pecking is
 # dir+HEN_PECKING, so a hen that has found birdseed ahead of it carries 7 or 8,
 # not 6 -- 6 is only the threshold the FSM tests against.
@@ -753,6 +768,21 @@ def sprite_tiles(sprite):
             rows = [sprite[(half * 8 + r) * 2 + col] for r in range(8)]
             out.append(to_gb_tile(rows, SPRITE_SHADE))
     return out
+
+
+def deshift(sprite):
+    """A 16x16 1bpp sprite (32 bytes, 2 a row, MSB first) moved 4px left.
+
+    The Z80's sprite writes are byte-aligned, so its art for a hen at the half
+    cell is drawn 4px right to cancel that; ours is not, so the shift comes back
+    off. Nothing is lost: only the ink in the rightmost 4px would be, and the
+    frames this applies to end their ink at column 11.
+    """
+    out = bytearray(SPRITE_BYTES)
+    for r in range(16):
+        row = ((sprite[r * 2] << 8) | sprite[r * 2 + 1]) << 4 & 0xFFFF
+        out[r * 2], out[r * 2 + 1] = row >> 8, row & 0xFF
+    return bytes(out)
 
 
 def build(asm_path):
@@ -784,6 +814,18 @@ def build(asm_path):
                      "sprite %d" % n) for n in HARRY_FRAMES]
     hens = [extract(mem, HEN_BASE + n * SPRITE_BYTES, SPRITE_BYTES,
                     "hen %d" % n) for n in range(HEN_FRAMES)]
+    hens = [deshift(h) if n in HEN_SHIFTED else h for n, h in enumerate(hens)]
+    for n, h in enumerate(hens):
+        ink = [c for c in range(16) if any(row >> (15 - c) & 1 for row in
+                                           ((h[r * 2] << 8) | h[r * 2 + 1]
+                                            for r in range(16)))]
+        # DrawOneHen puts the whole 16px sprite at the hen's own x, so a frame
+        # that starts its ink past column 0 is one the Z80 shifted and we did
+        # not. 6/7 are the untouched pecking composites; nothing draws them.
+        if n not in (6, 7) and ink[0]:
+            raise SystemExit(
+                "hen frame %d starts its ink at column %d -- the Z80's x&4 "
+                "shift is still in the art (HEN_SHIFTED)" % (n, ink[0]))
 
     # 8 levels x 21 bytes: [byte count][x,y,dir,frame] x n. The count is a BYTE
     # count, not a hen count -- 8 = 2 hens, 12 = 3, 16 = 4.
@@ -1049,8 +1091,9 @@ def asm_hens(hens):
            "; Hen 16x16 frames, 4 GB 8x8 tiles each, TL TR BL BR order.",
            "; Frame n starts at tile HEN_TILE_BASE + n*4.",
            "; 0 left  1 right  2/3 climb  4 left-walk  5 right-walk  6/7 pecking.",
-           "; The Z80 keeps 4px pre-shifted copies of these (`ADD A,$04`); they",
-           "; are deliberately not extracted -- an OBJ takes a pixel X.",
+           "; The Z80 keeps its +4px copies of 2/3 and 4/5, because its sprite",
+           "; writes are byte-aligned; an OBJ takes a pixel X, so the shift is",
+           "; taken off the art and every frame stands at the hen's own x.",
            'SECTION "Hens", ROM0', "", "HenTiles:"]
     for n, sp in enumerate(hens):
         out.append("    ; frame %d" % n)

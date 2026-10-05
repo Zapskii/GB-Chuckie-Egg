@@ -350,6 +350,53 @@ if not ground or ground[0] != oam_row:
          "the sprite and the playfield disagree about where the ground is"
          % (oam_row, ground[0] if ground else "nowhere on screen"))
 
+# --- 11b. A landing stops ON the tile, whatever the frame phase ------------
+# The part of section 7 that only shows on a raised platform. AirPhysics replays
+# PHYSICS_STEPS Spectrum iterations for one frame, and on the iteration he lands
+# CheckBelow clears PlayerInAir -- the Z80 takes the ground path from the next
+# iteration on. Replaying the fall regardless carried him up to 3 px into the
+# platform he had already landed on, and left PlayerInAir clear at a y that is
+# NOT y+1 % 8 == 0, which is a state nothing recovers from except a jump: the
+# player sees Harry sunk into a platform he dropped onto. Section 7 lands him on
+# the floor, where an overshoot has almost nothing below it to sink into and the
+# frame usually ends first, so it passed throughout. Driving the same drop from
+# all eight phases of the falling counter makes the sink deterministic.
+PLATFORM = 5
+ledge = next(((r, c) for r in range(2, 14) for c in range(1, 30)
+              if level[r * 32 + c] == PLATFORM
+              and level[r * 32 + c + 1] == PLATFORM
+              and all(level[(r + d) * 32 + c + e] == 0
+                      for d in range(1, 7) for e in (0, 1))), None)
+if ledge is None:
+    fail("no clear platform in level 1 to drop him onto")
+else:
+    r, c = ledge
+    want = r * 8 + 23                 # the y a landing on row r must give
+    sinks = {}
+    for phase in range(8):
+        pb.memory[wPlayerInAir] = 1
+        pb.memory[sym["wPlayerAirDirection"]] = 0xFF
+        pb.memory[sym["wPlayerJumpDirection"]] = 0
+        pb.memory[sym["wInAirCounter"]] = 0x28
+        pb.memory[sym["wFallingCounter"]] = phase
+        pb.memory[wPlayerX] = c * 8   # cell-aligned, so nothing else moves him
+        pb.memory[wPlayerY] = want + 40
+        pb.memory[sym["wPlayerDead"]] = 0
+        for _ in range(400):
+            pb.tick(1, True)
+            if reg("wPlayerInAir") == 0:
+                break
+        sinks[phase] = reg("wPlayerY") - want
+    print("drop onto the platform at (row %d, col %d), landing y should be "
+          "%d; sink by frame phase: %s"
+          % (r, c, want, [sinks[p] for p in sorted(sinks)]))
+    if any(sinks.values()):
+        fail("a landing on row %d stopped %s px past it (one entry per frame "
+             "phase) -- the frame's physics replay does not stop when he lands"
+             % (r, [sinks[p] for p in sorted(sinks)]))
+    if reg("wPlayerDead"):
+        fail("the drop onto the platform killed Harry")
+
 # --- 12. Falling through a hole in the floor kills him ----------------------
 # The Z80 leaves the level from under the floor: `POP HL / POP HL / RET` unwinds
 # past MainLoop -- which was entered by JP and so has no return address of its
