@@ -6,6 +6,12 @@ in WRAM, the BG map in VRAM, and the score digits. The cells are written into
 the buffer by the test rather than hunted for in the level data, so the rule
 being checked is the sampling rule and not "wherever an egg happens to be".
 
+The last section is the one a level change does not cover: a *death* keeps the
+map it died on -- the eggs collected and the corn eaten on the fatal attempt
+stay gone -- where a completed level loads a fresh one. Both directions matter
+and they fail in opposite ways, so a restart that reloads the level passes
+everything above it.
+
     python3 tools/verify_eggs.py build/l1.gb      # score 10 an egg
     python3 tools/verify_eggs.py build/l5.gb      # score 20
 """
@@ -47,7 +53,8 @@ def symbols(path):
 
 sym = symbols(SYM)
 need = ["wEggsRemaining", "wScore", "wCurrentLevel", "wLevelDone", "wLevelBuffer",
-        "wPlayerX", "wPlayerY", "wPlayerInAir", "wHens", "Level1", "Level2"]
+        "wPlayerX", "wPlayerY", "wPlayerInAir", "wPlayerDead", "wDeathTimer",
+        "wLives", "wHens", "Level1", "Level2"]
 missing = [n for n in need if n not in sym]
 if missing:
     raise SystemExit("FAIL: %s not in %s -- did the labels change?" % (missing, SYM))
@@ -239,6 +246,99 @@ if pb.memory[wBuffer:wBuffer + LEVEL_SIZE] != list(level2):
            if pb.memory[wBuffer + i] != level2[i]]
     fail("the reloaded level differs from Level%d in %d cells, first at %s"
          % (next_map + 1, len(bad), bad[:4]))
+
+# --- 6. A death keeps the level it died on ---------------------------------
+# On the Spectrum the level buffer is the level's own state: LoseLife copies it
+# into the player's slot and HasLivesRemaining copies the same bytes straight
+# back (Chuckie.asm:4532, :4617), and PlayLevel redraws *that* buffer (:5812) --
+# a map only ever comes from ROM when a level is completed (:4479). So the eggs
+# collected and the corn eaten on the fatal attempt stay gone, and the egg count
+# stays down with them. Only the score goes back, to the banked one.
+#
+# The death is driven through wPlayerDead/wDeathTimer, which is the interface
+# MainLoop's dead branch reads, rather than by parking a hen on him: what is
+# under test is the restart, not the collision.
+R3, C3 = 9, 3
+R4, C4 = 14, 9
+# Let the loop settle before poking. The level change above ran its reload across
+# a frame boundary -- the notice holds for 25 frames and the reload writes
+# 1700-odd bytes -- and a poke made between two ticks can land part-way through
+# the tick that would have acted on it, so the first collection after a reload
+# silently misses. Three frames is ample; nothing here is timing-sensitive.
+tick(3)
+banked = score()                     # the level's own starting score
+pb.memory[cell(R3, C3)] = TILE_EGG
+stand_on(R3, C3)
+tick(1)
+pb.memory[cell(R4, C4)] = TILE_BIRDSEED
+stand_on(R4, C4)
+tick(1)
+eggs_at_death, score_at_death = reg("wEggsRemaining"), score()
+died_on = reg("wCurrentLevel")
+level_at_death = pb.memory[wBuffer:wBuffer + LEVEL_SIZE]
+per_egg_now = 10 * (min(died_on >> 2, 9) + 1)
+print("before the death: egg (row %d, col %d)=%d, corn (row %d, col %d)=%d, "
+      "Eggs=%d score=%d (banked %d) level=%d"
+      % (R3, C3, pb.memory[cell(R3, C3)], R4, C4, pb.memory[cell(R4, C4)],
+         eggs_at_death, score_at_death, banked, died_on))
+if score_at_death != banked + per_egg_now + 5:
+    fail("the egg and the corn scored %d, expected %d"
+         % (score_at_death - banked, per_egg_now + 5))
+if (pb.memory[cell(R3, C3)], pb.memory[cell(R4, C4)]) != (TILE_BLANK, TILE_BLANK):
+    fail("the egg or the corn did not collect before the death, so this section "
+         "is not testing what it says")
+if eggs_at_death != EGGS_PER_LEVEL - 1:
+    fail("EggsRemaining is %d after one egg of a fresh level, expected %d"
+         % (eggs_at_death, EGGS_PER_LEVEL - 1))
+
+setreg("wLives", 5)                   # a life in hand: this death restarts
+setreg("wPlayerDead", 1)
+setreg("wDeathTimer", 1)              # the dead branch counts it out next frame
+for _ in range(120):
+    tick(1)
+    if not reg("wPlayerDead"):
+        break
+else:
+    fail("the death never restarted the level")
+print("after the death: Eggs=%d score=%d level=%d lives=%d "
+      "egg cell=%d corn cell=%d (screen %d/%d)"
+      % (reg("wEggsRemaining"), score(), reg("wCurrentLevel"), reg("wLives"),
+         pb.memory[cell(R3, C3)], pb.memory[cell(R4, C4)],
+         pb.memory[map_addr(R3, C3)], pb.memory[map_addr(R4, C4)]))
+if pb.memory[cell(R3, C3)] != TILE_BLANK:
+    fail("the egg collected before the death is back (%d in the level buffer): "
+         "the restart reloaded the level instead of keeping the map he died on"
+         % pb.memory[cell(R3, C3)])
+if pb.memory[cell(R4, C4)] != TILE_BLANK:
+    fail("the corn eaten before the death is back (%d in the level buffer)"
+         % pb.memory[cell(R4, C4)])
+if (pb.memory[map_addr(R3, C3)], pb.memory[map_addr(R4, C4)]) != (TILE_BLANK, TILE_BLANK):
+    fail("the egg or the corn is back on screen after the death (%d, %d)"
+         % (pb.memory[map_addr(R3, C3)], pb.memory[map_addr(R4, C4)]))
+if reg("wEggsRemaining") != eggs_at_death:
+    fail("EggsRemaining is %d after the death, expected the %d he died on"
+         % (reg("wEggsRemaining"), eggs_at_death))
+if reg("wCurrentLevel") != died_on:
+    fail("the death moved the level index to %d, expected %d"
+         % (reg("wCurrentLevel"), died_on))
+if reg("wLives") != 4:
+    fail("the death left %d lives, expected 4" % reg("wLives"))
+if score() != banked:
+    fail("the score is %d after the death, expected the banked %d -- the %d "
+         "points of the fatal attempt are forfeit"
+         % (score(), banked, score_at_death - banked))
+after = pb.memory[wBuffer:wBuffer + LEVEL_SIZE]
+# One direction only: a reload can bring cells *back*, while everything else
+# that happens to this map only ever blanks cells -- and a hen can eat a corn
+# cell in the same tick the restart finishes, so an exact comparison would
+# fail on a hen's dinner. What is asserted is that nothing the death collected
+# came back.
+came_back = [i for i in range(LEVEL_SIZE)
+             if level_at_death[i] == TILE_BLANK and after[i] != TILE_BLANK]
+if came_back:
+    fail("%d cell(s) the death had cleared came back, first at %s -- the restart "
+         "reloaded the level instead of keeping the map he died on"
+         % (len(came_back), came_back[:4]))
 
 pb.stop(save=False)
 for f in failed:

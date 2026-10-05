@@ -954,8 +954,9 @@ MainLoop:
 
     ; Dead: hold everything still for a moment, then restart the level. The Z80
     ; unwinds its call stack to leave the game loop here and comes back through
-    ; PlayLevel, which reloads the level -- eaten eggs and all, which is why the
-    ; restart goes the whole way rather than just resetting Harry and the hens.
+    ; PlayLevel, which redraws the level *as it stands* -- eaten eggs and all, so
+    ; the restart goes the whole way through the level's per-life reset but not
+    ; through LoadLevel, which would put back a fresh map. See RestartLevel.
     ld a, [wPlayerDead]
     and a
     jr z, .level_done
@@ -972,16 +973,16 @@ MainLoop:
     call EnterScores
     jr MainLoop
 .restart
-    ; The reload comes first and the flag second, so that anything watching
+    ; The restart comes first and the flag second, so that anything watching
     ; wPlayerDead for the restart to be over sees it finished -- LoadLevel
     ; writes 1700-odd bytes and cannot fit inside the VBlank it opens with, so
     ; it runs across a frame boundary either way.
-    call NextLevel.reload
+    call RestartLevel
     xor a
     ld [wPlayerDead], a
-    ; The level has been reloaded under the shadow, and the handler copies it
-    ; out whatever the main line did, so the first frame of the new level would
-    ; otherwise show the last frame of the old one.
+    ; The level has been redrawn under the shadow, and the handler copies it
+    ; out whatever the main line did, so the first frame of the restarted level
+    ; would otherwise show the last frame of the fatal one.
     call DrawFrame
     jr MainLoop
 
@@ -3899,6 +3900,9 @@ PlayerPickUp:
 ; LoadLevel: the level wCurrentLevel names, from ROM to screen and back to its
 ; starting state. The LCD must be off when this is called -- ClearMap and
 ; DrawLevel write VRAM.
+;
+; A death re-enters at .restart below, which is everything here except the two
+; lines that make it a *fresh* map.
 ; ---------------------------------------------------------------------------
 LoadLevel:
     ld hl, LevelPtrs
@@ -3906,7 +3910,26 @@ LoadLevel:
     ld hl, wLevelBuffer
     ld bc, LEVEL_WIDTH * LEVEL_HEIGHT
     call MemCopy
+    call ResetEggs
 
+;
+; .restart: the same level again after a death -- and the map it died on, not a
+; fresh one. On the Spectrum a death keeps everything the level had become: eggs
+; already collected and corn already eaten stay gone, and EggsRemaining keeps
+; its count. LoseLife saves the level buffer into the player's slot (:4532 --
+; LevelBuffer to the slot, whatever the listing's comment there says) and
+; HasLivesRemaining copies the same bytes straight back (:4617), which for one
+; player is the buffer it already had; EggsRemaining is saved and restored
+; beside it, so the count is kept too, not set to twelve. A map only ever
+; arrives from ROM on completion (:4479) -- PlayLevel *draws* LevelBuffer
+; (:5812) and never reloads one. Coming through LoadLevel here brought every
+; collected egg and eaten cell back, and let the fatal attempt be re-scored.
+;
+; The rest of what PlayLevel does on the way in is per-life, and IS redone on
+; the death path: the player, the hens, the duck, the lifts, the clock and the
+; banked score (:5887 the clock, :6164 the lifts). So the reset below stays
+; whole -- only the map and the egg count are the level's own state.
+.restart:
     call ClearMap
     ; The sprite image goes with the map. The draws below cover only the slots
     ; this level fills, so without this one that spawns fewer hens than the last
@@ -3919,12 +3942,13 @@ LoadLevel:
     call ResetHens
     call ResetDuck
     call ResetLifts
-    call ResetEggs
     call ResetTimer
     ; The Z80's PlayLevel starts a level on the player's banked score, which is
     ; the same thing a death's HasLivesRemaining wants -- so a death, which
     ; comes through here too, reverts the score to what it was when the level
-    ; began and the points earned on the fatal attempt are gone.
+    ; began and the points earned on the fatal attempt are gone. The collected
+    ; eggs are NOT given back with it: those are the level's state, not the
+    ; score's, and the Z80 restores the map it died on.
     call LoadSavedScore
     call UpdateCamera
     call StopMusic
@@ -3969,11 +3993,25 @@ NextLevel:
     di
     call LcdOffForVram
     call LoadLevel
+.lcd_on
     call DrawHud                     ; VRAM is addressable with the LCD off
     ld a, LCDC_BASE
     ldh [rLCDC], a
     ei
     ret
+
+; ---------------------------------------------------------------------------
+; RestartLevel: a death, once its freeze is over. The reload's tail with the
+; level left standing -- LoadLevel.restart keeps the map it died on. The Z80 has
+; no counterpart to this routine because it never had this problem: its death
+; path copies the map it died on back over itself and redraws it, and only a
+; completed level loads a new one from ROM.
+; ---------------------------------------------------------------------------
+RestartLevel:
+    di
+    call LcdOffForVram
+    call LoadLevel.restart
+    jr NextLevel.lcd_on
 
 ; ---------------------------------------------------------------------------
 ; The title screen -- the Z80's FrontEnd. Reached from Start, so the ROM opens

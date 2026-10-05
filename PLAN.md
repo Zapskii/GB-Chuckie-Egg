@@ -246,6 +246,72 @@ changes — so prove that in Phase 1 before writing a line of game logic.
 
 ## Progress
 
+### A death kept the level — eggs and corn come back on the Spectrum, not here (2026-10-06)
+
+**Reported:** in the Spectrum original the eggs already collected and the corn
+already eaten are *remembered* across a death, instead of being reset with the
+level — and the port was putting them all back.
+
+**The source.** On the Z80 the level buffer is the level's own state, and the
+death path never reloads one.
+
+- `LoseLife` (`Chuckie.asm:4532`) copies `LevelBuffer` **into** the current
+  player's slot. mrcook's listing comments that line the other way round, but
+  the instruction is `LDIR` and `LDIR` copies (HL)→(DE), so it is a save.
+- `HasLivesRemaining` (`:4617`) copies the same bytes straight back out with the
+  same direction — which for one player is the buffer it already had.
+- `EggsRemaining` is saved and restored beside the map (`LD A,(HL)` → the
+  player's slot, and back), so the *count* is kept too, not set to twelve.
+- `PlayLevel` (`:5812`) only ever **draws** `LevelBuffer`; a map arrives from
+  ROM in exactly one place, the level-completion path (`:4479`).
+
+Everything else PlayLevel does on the way in *is* per-life and the port already
+redid it: the clock (`:5887`), the hens, the duck, the player — and the lifts,
+whose initialiser `LD HL,LiftReset1` (`:6164`) sits inside PlayLevel's own body.
+The score reverts to the banked one, and the Z80 does that too
+(`HasLivesRemaining` restores `P{n}Score`).
+
+**The divergence.** The port reached its death restart through `NextLevel.reload`
+→ `LoadLevel`, the same routine a completed level uses, so `MemCopy` refilled
+`wLevelBuffer` from ROM and `ResetEggs` put the count back to 12. Three
+consequences, and the third is the one with teeth: collected eggs and eaten corn
+were resurrected on screen; `wEggsRemaining` went back to 12 so the level needed
+a dozen more; and the points already scored on the fatal attempt were forfeit
+*and farmable* — die, restart, collect the same eggs again for another full
+level's worth of score.
+
+**Fixed** by splitting the routine rather than duplicating it. `LoadLevel` keeps
+its two fresh-map lines (the `MemCopy` and the `ResetEggs`) and falls into
+`.restart`, which is the whole per-life reset it already had — `ClearMap`,
+`ClearOamShadow`, `DrawLevel`, the five `Reset*`, `LoadSavedScore`,
+`UpdateCamera`, `StopMusic`. A death goes to a new `RestartLevel`, which is
+`NextLevel.reload`'s tail around `LoadLevel.restart`; completion still goes
+through `LoadLevel` unaltered. The map and the egg count are the level's state;
+the score, the entities and the clock are the life's.
+
+**Checked** by `verify_eggs.py` section 6, which drives the death through
+`wPlayerDead`/`wDeathTimer` (the interface `MainLoop`'s dead branch reads)
+rather than by parking a hen on Harry — what is under test is the restart, not
+the collision. It collects an egg and a corn cell on the level it will die on,
+kills him there, and after the restart asserts: both cells still blank in the
+buffer *and* in the BG map, `wEggsRemaining` still the count he died on,
+`wCurrentLevel` unchanged, `wLives` one down, and the score back at the banked
+value. Against a reverted ROM it fails with exactly the five messages the bug
+earns — "the egg collected before the death is back (1 in the level buffer): the
+restart reloaded the level instead of keeping the map he died on", the corn, the
+on-screen pair, "EggsRemaining is 12 after the death, expected the 11 he died
+on", and the two-cell `came_back` list.
+
+Two notes on that check, both of them traps that bit while writing it. The
+first poke after a reload misses: the level change's `ShowNotice` hold and the
+1700-byte redraw run across a frame boundary, so a write placed between two
+`pb.tick()` calls can land part way through the tick that would have consumed
+it — the section settles three frames first. And the buffer comparison is
+one-directional on purpose: a reload can only bring cells *back*, while the
+running level only ever blanks them, and a hen can eat a corn cell in the same
+tick the restart finishes — an exact comparison fails on the hen's dinner, so
+what is asserted is that nothing the death had cleared came back.
+
 ### The hens never left their platforms — the ladder gate is a byte of ROM, not the counter (2026-10-05)
 
 **Reported from a screenshot of the Spectrum original:** on level 1 both hens
