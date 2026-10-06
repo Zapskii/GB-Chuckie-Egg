@@ -966,7 +966,10 @@ assembler, and `GetLevelEntry` indexes both tables with `wCurrentLevel`.
   what the ROM boots into and `wCurrentLevel` owns it from there (`NextLevel` is
   the Z80's `AND $07` cycle). The death path already restarted the level
   (Phase 4a), so level flow routes through that same reload rather than
-  growing a second one — `NextLevel.reload` is the shared entry point.
+  growing a second one — `NextLevel.reload` is the shared entry point. (Since
+  2026-10-06 a death splits off it into `RestartLevel`/`LoadLevel.restart`: it
+  keeps the map it died on instead of reloading one. Same tail, two lines
+  fewer.)
 - **The counters have no screen until Phase 6.** Eggs clear visibly (they are BG
   tiles) but eggs-remaining and score are WRAM-only, asserted headlessly.
 
@@ -1432,8 +1435,9 @@ start of a level, `LevelCompleted` (4420) writes the live copy back when the
 level is won, and `HasLivesRemaining` (4605) loads the saved copy *again* after
 a death. So **dying forfeits the points earned on the fatal attempt**, while
 winning banks them. The port mirrors all three: `wScoreSaved` beside `wScore`,
-`LoadSavedScore` from `LoadLevel` (which both a fresh level and a death reload
-come through), and `SaveScore` on the completion path only, after `DrainBonus`
+`LoadSavedScore` from `LoadLevel` (which both a fresh level and a death come
+through — a death via its `.restart` half, see 2026-10-06), and `SaveScore` on
+the completion path only, after `DrainBonus`
 so the bonus is included. `ResetScore` clears both, because a new game has
 nothing banked to fall back on. `verify_lives.py` checks a death against a
 *non-zero* banked score, so "the score came back" cannot pass as "the score was
